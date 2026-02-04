@@ -6,9 +6,14 @@
 
 <video src="https://github.com/user-attachments/assets/1193ffab-9325-4d4b-bd91-55780cccadf8" width="600"></video>
 
+
+| *<b>Please see the new development branch of this tool:<br> [Computer-assisted Annotation and Analysis of Music Performance (CAAMP)](https://github.com/yucongj/CAAMP).</b>* |
+| :---: |
+
 This software is adapted from [Sonic Visualiser](https://github.com/sonic-visualiser/sonic-visualiser), but with an added panel displaying musical scores, and additional features such as audio-to-score alignment. Its interface is designed to help streamline the processes of loading a digital score and a performance recording, editing and visualizing annotations, and exporting score-aware annotations.
 
 *Piano Precision* needs to be used together with Vamp aligner plugins that can conduct audio-to-score alignment. Existing releases already include a default plugin, [piano aligner](https://github.com/yucongj/piano-aligner). For anyone who would like to develop new aligner plugins for *Piano Precision*, please refer to the later section [Developing Vamp aligner plugins](#developing-vamp-aligner-plugins).
+
 
 ## How to use *Piano Precision*
 
