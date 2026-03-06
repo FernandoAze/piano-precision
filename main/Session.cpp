@@ -61,7 +61,6 @@ Session::setDocument(Document *doc,
     m_topPane = topPane;
     m_bottomPane = bottomPane;
     m_timeRulerLayer = timeRuler;
-    m_waveformLayer = nullptr;
     m_spectrogramLayer = nullptr;
 
     m_partialAlignmentAudioStart = -1;
@@ -125,22 +124,13 @@ Session::setMainModel(ModelId modelId, QString scoreId)
         return;
     }
 
-    if (m_waveformLayer) {
+    if (m_spectrogramLayer) {
         //!!! Review this
-        SVDEBUG << "Session::setMainModel: Waveform layer already exists - currently we expect a process by which the document and panes are created and then setMainModel called here only once per document" << endl;
+        SVDEBUG << "Session::setMainModel: Spectrogram layer already exists - currently we expect a process by which the document and panes are created and then setMainModel called here only once per document" << endl;
         return;
     }
 
     m_document->addLayerToView(m_bottomPane, m_timeRulerLayer);
-    
-    ColourDatabase *cdb = ColourDatabase::getInstance();
-
-    m_waveformLayer = qobject_cast<WaveformLayer *>
-        (m_document->createLayer(LayerFactory::Waveform));
-    m_waveformLayer->setBaseColour(cdb->getColourIndex(tr("Orange")));
-    
-    m_document->addLayerToView(m_bottomPane, m_waveformLayer);
-    m_document->setModel(m_waveformLayer, modelId);
 
     m_spectrogramLayer = qobject_cast<SpectrogramLayer *>
         (m_document->createLayer(LayerFactory::MelodicRangeSpectrogram));

@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Piano Precision",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/Piano Precision",
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build-piano-precision",
+      "env": {
+        "DYLD_FRAMEWORK_PATH": "${env:HOME}/Qt/6.5.3/macos/lib",
+        "DYLD_LIBRARY_PATH": "${env:HOME}/Qt/6.5.3/macos/lib"
+      }
+    }
+  ]
+}

@@ -4503,8 +4503,11 @@ MainWindow::documentReplaced()
     }
 
     Pane *topPane = m_paneStack->addPane();
-    Pane *bottomPane = m_paneStack->addPane();
+    //Comentei esta linha fora para não aparecer a waveform.
+    //Pane *bottomPane = m_paneStack->addPane();
 
+    //m_paneStack->hidePane(bottomPane);
+    
     topPane->setSelectionSnapToFeatures(false);
     bottomPane->setSelectionSnapToFeatures(false);
     

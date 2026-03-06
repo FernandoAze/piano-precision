@@ -1,0 +1,12 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build-piano-precision",
+      "type": "shell",
+      "command": "meson compile -C build",
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}

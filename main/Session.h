@@ -16,7 +16,6 @@
 #include "framework/Document.h"
 
 #include "layer/TimeRulerLayer.h"
-#include "layer/WaveformLayer.h"
 #include "layer/SpectrogramLayer.h"
 #include "layer/TimeInstantLayer.h"
 #include "layer/TimeValueLayer.h"
@@ -106,7 +105,6 @@ private:
     sv::Pane *m_topPane;
     sv::Pane *m_bottomPane;
     sv::Layer *m_timeRulerLayer;
-    sv::WaveformLayer *m_waveformLayer;
     sv::SpectrogramLayer *m_spectrogramLayer;
 
     sv::sv_frame_t m_partialAlignmentAudioStart;
