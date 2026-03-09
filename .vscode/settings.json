@@ -1,3 +1,4 @@
 {
-    "cmake.sourceDirectory": "/Users/fernando/Documents/GitHub/piano-precision/vamp-plugin-sdk"
+    "cmake.sourceDirectory": "/Users/fernando/Documents/GitHub/piano-precision/vamp-plugin-sdk",
+    "makefile.configureOnOpen": false
 }

@@ -7,11 +7,7 @@
       "request": "launch",
       "program": "${workspaceFolder}/build/Piano Precision",
       "cwd": "${workspaceFolder}",
-      "preLaunchTask": "build-piano-precision",
-      "env": {
-        "DYLD_FRAMEWORK_PATH": "${env:HOME}/Qt/6.5.3/macos/lib",
-        "DYLD_LIBRARY_PATH": "${env:HOME}/Qt/6.5.3/macos/lib"
-      }
+      "preLaunchTask": "build-piano-precision"
     }
   ]
 }
