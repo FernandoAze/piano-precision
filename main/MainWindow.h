@@ -29,6 +29,8 @@
 class QFileSystemWatcher;
 class QScrollArea;
 class QToolButton;
+class QNetworkAccessManager;
+class QNetworkReply;
 
 namespace sv {
 class VersionTester;
@@ -163,6 +165,8 @@ protected slots:
     void populateScoreAlignerChoiceMenu();
     void scoreAlignerChosen(sv::TransformId);
     void highlightFrameInScore(sv::sv_frame_t);
+    void beatThisButtonClicked();
+    void beatThisNetworkReplyFinished();
     void scoreSelectionChanged(Fraction, bool, ScoreWidget::EventLabel, Fraction, bool, ScoreWidget::EventLabel);
     void scorePageChanged(int page);
     void scorePageDownButtonClicked();
@@ -232,6 +236,9 @@ protected:
     ScoreWidget             *m_scoreWidget;
     QPushButton             *m_alignButton;
     QPushButton             *m_alignerChoice;
+    QAction                 *m_beatThisAction;
+    QNetworkAccessManager   *m_beatThisNetworkManager;
+    sv::TimeInstantLayer    *m_beatThisLayer;
     QWidget                 *m_alignCommands;
     QPushButton             *m_alignAcceptButton;
     QPushButton             *m_alignRejectButton;

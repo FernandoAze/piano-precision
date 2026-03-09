@@ -142,6 +142,14 @@
 #include <QSplitter>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QNetworkReply>
+#include <QHttpMultiPart>
+#include <QHttpPart>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 
 #include <iostream>
 #include <cstdio>
@@ -172,6 +180,9 @@ MainWindow::MainWindow(AudioMode audioMode, MIDIMode midiMode, bool withOSCSuppo
     m_rightButtonTransformsMenu(nullptr),
     m_rightButtonPlaybackMenu(nullptr),
     m_lastRightButtonPropertyMenu(nullptr),
+    m_beatThisAction(nullptr),
+    m_beatThisNetworkManager(nullptr),
+    m_beatThisLayer(nullptr),
     m_soloAction(nullptr),
     m_rwdStartAction(nullptr),
     m_rwdSimilarAction(nullptr),
@@ -223,6 +234,7 @@ MainWindow::MainWindow(AudioMode audioMode, MIDIMode midiMode, bool withOSCSuppo
     cdb->setUseDarkBackground(cdb->addColour(QColor(20, 255, 90), tr("Bright Green")), true);
     cdb->setUseDarkBackground(cdb->addColour(QColor(225, 74, 255), tr("Bright Purple")), true);
     cdb->setUseDarkBackground(cdb->addColour(QColor(255, 188, 80), tr("Bright Orange")), true);
+    cdb->setUseDarkBackground(cdb->addColour(QColor(255, 220, 0), tr("Bright Yellow")), true);
 
     SVDEBUG << "MainWindow: Creating main user interface layout" << endl;
 
@@ -2767,6 +2779,160 @@ MainWindow::alignButtonClicked()
 }
 
 void
+MainWindow::beatThisButtonClicked()
+{
+    SVDEBUG << "MainWindow::beatThisButtonClicked" << endl;
+
+    auto mainModel = getMainModel();
+    if (!mainModel) {
+        QMessageBox::warning(this, tr("No Audio Loaded"),
+                             tr("<b>No audio loaded</b><p>Please load an audio file before running Beat This!."));
+        return;
+    }
+
+    QString audioPath = mainModel->getLocation();
+    if (audioPath.isEmpty()) {
+        QMessageBox::warning(this, tr("Cannot Determine Audio Path"),
+                             tr("<b>Cannot find audio file</b><p>The audio location could not be determined."));
+        return;
+    }
+
+    // Only support local files for now
+    QUrl audioUrl(audioPath);
+    QString localPath = audioUrl.isLocalFile() ? audioUrl.toLocalFile() : audioPath;
+    if (!QFile::exists(localPath)) {
+        QMessageBox::warning(this, tr("Audio File Not Found"),
+                             tr("<b>Audio file not found</b><p>Could not find the audio file at: %1").arg(localPath));
+        return;
+    }
+
+    if (m_beatThisAction) m_beatThisAction->setEnabled(false);
+
+    if (!m_beatThisNetworkManager) {
+        m_beatThisNetworkManager = new QNetworkAccessManager(this);
+    }
+
+    QHttpMultiPart *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+
+    QHttpPart audioPart;
+    audioPart.setHeader(QNetworkRequest::ContentTypeHeader, QVariant("audio/wav"));
+    audioPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                        QVariant(QString("form-data; name=\"audio\"; filename=\"%1\"")
+                                 .arg(QFileInfo(localPath).fileName())));
+
+    QFile *audioFile = new QFile(localPath);
+    if (!audioFile->open(QIODevice::ReadOnly)) {
+        delete audioFile;
+        delete multiPart;
+        if (m_beatThisAction) m_beatThisAction->setEnabled(true);
+        QMessageBox::warning(this, tr("Cannot Open Audio File"),
+                             tr("<b>Cannot open audio file</b><p>Failed to open: %1").arg(localPath));
+        return;
+    }
+    audioFile->setParent(multiPart);
+    audioPart.setBodyDevice(audioFile);
+    multiPart->append(audioPart);
+
+    QNetworkRequest request(QUrl("http://localhost:5000/detect-beats"));
+    QNetworkReply *reply = m_beatThisNetworkManager->post(request, multiPart);
+    multiPart->setParent(reply);
+
+    connect(reply, &QNetworkReply::finished,
+            this, &MainWindow::beatThisNetworkReplyFinished);
+
+    SVDEBUG << "MainWindow::beatThisButtonClicked: POST sent to http://localhost:5000/detect-beats for file " << localPath << endl;
+}
+
+void
+MainWindow::beatThisNetworkReplyFinished()
+{
+    QNetworkReply *reply = qobject_cast<QNetworkReply *>(sender());
+    if (!reply) return;
+    reply->deleteLater();
+
+    if (m_beatThisAction) m_beatThisAction->setEnabled(true);
+
+    if (reply->error() != QNetworkReply::NoError) {
+        SVDEBUG << "MainWindow::beatThisNetworkReplyFinished: Network error: "
+                << reply->errorString() << endl;
+        QMessageBox::warning(this, tr("Beat This! Error"),
+                             tr("<b>Beat This! server error</b><p>Could not connect to the Beat This! server at localhost:5000.<p>Please make sure the server is running:<br><tt>python beat_this_server.py</tt><p>Error: %1")
+                             .arg(reply->errorString()));
+        return;
+    }
+
+    QByteArray responseData = reply->readAll();
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(responseData, &parseError);
+
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        SVDEBUG << "MainWindow::beatThisNetworkReplyFinished: JSON parse error: "
+                << parseError.errorString() << endl;
+        QMessageBox::warning(this, tr("Beat This! Error"),
+                             tr("<b>Beat This! response error</b><p>Could not parse the response from the Beat This! server."));
+        return;
+    }
+
+    QJsonObject obj = doc.object();
+    if (!obj.value("success").toBool()) {
+        QString errMsg = obj.value("error").toString("Unknown error");
+        SVDEBUG << "MainWindow::beatThisNetworkReplyFinished: Server returned error: "
+                << errMsg << endl;
+        QMessageBox::warning(this, tr("Beat This! Error"),
+                             tr("<b>Beat This! detection failed</b><p>%1").arg(errMsg));
+        return;
+    }
+
+    QJsonArray beatsArray = obj.value("beats").toArray();
+    if (beatsArray.isEmpty()) {
+        QMessageBox::information(this, tr("Beat This!"),
+                                 tr("Beat This! detected no beats in the audio."));
+        return;
+    }
+
+    auto mainModel = getMainModel();
+    if (!mainModel) return;
+    sv_samplerate_t sampleRate = mainModel->getSampleRate();
+
+    // Create (or reuse) the BeatThis layer on the top pane
+    if (!m_beatThisLayer) {
+        Pane *topPane = m_paneStack->getPane(0);
+        if (!topPane || !m_document) {
+            QMessageBox::warning(this, tr("Beat This! Error"),
+                                 tr("<b>No pane available</b><p>Please load an audio file first."));
+            return;
+        }
+        m_beatThisLayer = dynamic_cast<TimeInstantLayer *>(
+            m_document->createEmptyLayer(LayerFactory::TimeInstants));
+        if (!m_beatThisLayer) return;
+        ColourDatabase *cdb = ColourDatabase::getInstance();
+        m_beatThisLayer->setBaseColour(cdb->getColourIndex(tr("Bright Yellow")));
+        m_beatThisLayer->setLayerDormant(topPane, false);
+        m_document->addLayerToView(topPane, m_beatThisLayer);
+    }
+
+    // Populate the model with beat timestamps
+    auto model = ModelById::getAs<SparseOneDimensionalModel>(m_beatThisLayer->getModel());
+    if (!model) return;
+
+    // Remove existing events
+    EventVector oldEvents = model->getAllEvents();
+    for (const auto &e : oldEvents) {
+        model->remove(e);
+    }
+
+    // Add new beat events
+    for (const auto &beatVal : beatsArray) {
+        double beatSec = beatVal.toDouble();
+        sv_frame_t frame = sv_frame_t(beatSec * sampleRate);
+        model->add(Event(frame, QString()));
+    }
+
+    SVDEBUG << "MainWindow::beatThisNetworkReplyFinished: Added "
+            << beatsArray.size() << " beats to BeatThis layer" << endl;
+}
+
+void
 MainWindow::scoreInteractionModeChanged(ScoreWidget::InteractionMode mode)
 {
     SVDEBUG << "MainWindow::scoreInteractionModeChanged: mode = " << int(mode)
@@ -3402,6 +3568,13 @@ MainWindow::setupToolbars()
 
     toolbar = addToolBar(tr("Edit Toolbar"));
     CommandHistory::getInstance()->registerToolbar(toolbar);
+
+    toolbar = addToolBar(tr("Analysis Toolbar"));
+    m_beatThisAction = toolbar->addAction(tr("BeatThis!"));
+    m_beatThisAction->setStatusTip(tr("Detect beats in the loaded audio using Beat This! and display them as a yellow Time Instants layer"));
+    m_beatThisAction->setEnabled(false);
+    connect(m_beatThisAction, SIGNAL(triggered()), this, SLOT(beatThisButtonClicked()));
+    connect(this, SIGNAL(canPlay(bool)), m_beatThisAction, SLOT(setEnabled(bool)));
 
     toolbar = addToolBar(tr("Tools Toolbar"));
     QActionGroup *group = new QActionGroup(this);
@@ -4593,6 +4766,7 @@ MainWindow::closeSession()
 
     SVDEBUG << "MainWindow::closeSession: telling session about it" << endl;
     m_session.unsetDocument();
+    m_beatThisLayer = nullptr; // will be destroyed with the document
 
     while (m_paneStack->getPaneCount() > 0) {
 
@@ -6049,6 +6223,9 @@ void
 MainWindow::layerRemoved(Layer *layer)
 {
     Profiler profiler("MainWindow::layerRemoved");
+    if (layer == m_beatThisLayer) {
+        m_beatThisLayer = nullptr;
+    }
     setupExistingLayersMenus();
     MainWindowBase::layerRemoved(layer);
 }
