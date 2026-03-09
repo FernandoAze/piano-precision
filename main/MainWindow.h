@@ -228,6 +228,7 @@ protected:
     sv::WaveformLayer           *m_panLayer;
     
     QScrollArea             *m_mainScroll;
+    QScrollArea             *m_scoreScroll;
     ScoreWidget             *m_scoreWidget;
     QPushButton             *m_alignButton;
     QPushButton             *m_alignerChoice;

@@ -50,6 +50,7 @@ ScoreWidget::ScoreWidget(bool withZoomControls, QWidget *parent) :
     QFrame(parent),
     m_page(-1),
     m_scale(100),
+    m_horizontalLayout(false),
     m_mode(InteractionMode::None),
     m_mouseActive(false)
 {
@@ -144,6 +145,44 @@ ScoreWidget::getScale() const
     return m_scale;
 }
 
+void
+ScoreWidget::setHorizontalLayout(bool horizontal)
+{
+    if (m_horizontalLayout == horizontal) return;
+    m_horizontalLayout = horizontal;
+    if (!m_scoreFilename.isEmpty()) {
+        auto scoreName = m_scoreName;
+        auto scoreFilename = m_scoreFilename;
+        auto musicalEvents = m_musicalEvents;
+        QString errorString;
+        if (loadScoreFile(scoreName, scoreFilename, errorString)) {
+            setMusicalEvents(musicalEvents);
+            if (m_highlightEventLabel != "") {
+                setHighlightEventByLabel(m_highlightEventLabel);
+            }
+        }
+    }
+    update();
+}
+
+QSize
+ScoreWidget::sizeHint() const
+{
+    if (m_horizontalLayout && !m_renderedSize.isEmpty()) {
+        return m_renderedSize;
+    }
+    return QFrame::sizeHint();
+}
+
+QSize
+ScoreWidget::minimumSizeHint() const
+{
+    if (m_horizontalLayout) {
+        return QSize(100, 80);
+    }
+    return QFrame::minimumSizeHint();
+}
+
 bool
 ScoreWidget::loadScoreFile(QString scoreName, QString scoreFile, QString &errorString)
 {
@@ -177,8 +216,24 @@ ScoreWidget::loadScoreFile(QString scoreName, QString scoreFile, QString &errorS
     }
 
     string defaultOptions = "\"footer\": \"none\"";
-    
-    if (m_scale != 100) {
+
+    if (m_horizontalLayout) {
+        // Render as a single horizontal system: no line breaks,
+        // very wide page, height adjusted to content
+        string horizOptions = "\"breaks\": \"none\", "
+            "\"adjustPageHeight\": true, "
+            "\"adjustPageWidth\": true, "
+            "\"pageWidth\": 60000, "
+            + defaultOptions;
+        if (m_scale != 100) {
+            toolkit.SetOptions("{\"scaleToPageSize\": true, " + horizOptions + "}");
+            if (!toolkit.SetScale(m_scale)) {
+                SVDEBUG << "ScoreWidget::loadScoreFile: Failed to set rendering scale" << endl;
+            }
+        } else {
+            toolkit.SetOptions("{" + horizOptions + "}");
+        }
+    } else if (m_scale != 100) {
         toolkit.SetOptions("{\"scaleToPageSize\": true, " + defaultOptions + "}");
         if (!toolkit.SetScale(m_scale)) {
             SVDEBUG << "ScoreWidget::loadScoreFile: Failed to set rendering scale" << endl;
@@ -781,8 +836,26 @@ ScoreWidget::paintEvent(QPaintEvent *e)
         SVDEBUG << "ScoreWidgetPDF::paint: one of our dimensions is zero, can't proceed" << endl;
         return;
     }
-    
-    double scale = std::min(ww / pw, wh / ph);
+
+    double scale;
+    if (m_horizontalLayout) {
+        // Scale to fit height; width will extend as needed
+        scale = wh / ph;
+        int requiredWidth = int(pw * scale + 0.5);
+        QSize newSize(requiredWidth, int(wh));
+        if (newSize != m_renderedSize) {
+            m_renderedSize = newSize;
+            // Resize widget to match the full rendered width so
+            // the parent scroll area can scroll horizontally
+            if (requiredWidth > int(ww)) {
+                setMinimumWidth(requiredWidth);
+                updateGeometry();
+                emit scoreSizeChanged();
+            }
+        }
+    } else {
+        scale = std::min(ww / pw, wh / ph);
+    }
     double xorigin = (ww - (pw * scale)) / 2.0;
     double yorigin = (wh - (ph * scale)) / 2.0;
 
@@ -1011,6 +1084,13 @@ ScoreWidget::setHighlightEventByLabel(EventLabel label)
                 << page << endl;
 #endif
         showPage(page);
+    }
+
+    if (m_horizontalLayout) {
+        QRectF rect = getHighlightRectFor(m_eventToHighlight);
+        if (rect != QRectF()) {
+            emit highlightPositionChanged(int(rect.x()));
+        }
     }
 
     update();

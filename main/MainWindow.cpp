@@ -139,6 +139,9 @@
 #include <QActionGroup>
 #include <QFileDialog>
 #include <QDockWidget>
+#include <QSplitter>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
 
 #include <iostream>
 #include <cstdio>
@@ -240,12 +243,14 @@ MainWindow::MainWindow(AudioMode audioMode, MIDIMode midiMode, bool withOSCSuppo
     scoreWidgetDock->setFeatures(QDockWidget::DockWidgetMovable |
                                  QDockWidget::DockWidgetFloatable);
     scoreWidgetDock->setWindowTitle(tr("Score"));
+    scoreWidgetDock->hide(); // Hidden: score now shown in horizontal pane below
     
-    QWidget *scoreWidgetContainer = new QWidget(scoreWidgetDock);
+    QWidget *scoreWidgetContainer = new QWidget;
     
     QGridLayout *scoreWidgetLayout = new QGridLayout;
 
     m_scoreWidget = new ScoreWidget(true, scoreWidgetContainer);
+    m_scoreWidget->setHorizontalLayout(true);
     m_scoreWidget->setInteractionMode(ScoreWidget::InteractionMode::Navigate);
     connect(m_scoreWidget, &ScoreWidget::scoreLocationHighlighted,
             this, &MainWindow::scoreLocationHighlighted);
@@ -309,21 +314,22 @@ MainWindow::MainWindow(AudioMode audioMode, MIDIMode midiMode, bool withOSCSuppo
     m_scorePageLabel = new QLabel(tr("Page"));
     m_scorePageLabel->setAlignment(Qt::AlignHCenter);
 
-    scoreWidgetLayout->addWidget(m_scoreWidget, 0, 0, 1, 3);
-    scoreWidgetLayout->setRowStretch(0, 10);
-    
-    scoreWidgetLayout->addWidget(m_alignCommands, 1, 0, 1, 3, Qt::AlignHCenter);
-    scoreWidgetLayout->addWidget(m_alignAcceptReject, 1, 0, 1, 3, Qt::AlignHCenter);
-    m_alignAcceptReject->hide();
-    scoreWidgetLayout->addWidget(m_scorePageDownButton, 2, 0);
-    scoreWidgetLayout->addWidget(m_scorePageLabel, 2, 1, Qt::AlignCenter);
-    scoreWidgetLayout->addWidget(m_scorePageUpButton, 2, 2);
+    // In horizontal layout, page navigation is not needed (single system)
+    m_scorePageDownButton->hide();
+    m_scorePageUpButton->hide();
+    m_scorePageLabel->hide();
 
-    QGroupBox *selectionGroupBox = new QGroupBox(tr("Selection within Score"));
-    QGridLayout *selectionLayout = new QGridLayout;
+    // Build score controls in a horizontal bar below the score
+    QWidget *scoreControlBar = new QWidget;
+    QHBoxLayout *scoreControlLayout = new QHBoxLayout;
+    scoreControlLayout->setContentsMargins(2, 2, 2, 2);
+    scoreControlLayout->setSpacing(6);
+    scoreControlLayout->addWidget(m_alignCommands);
+    scoreControlLayout->addWidget(m_alignAcceptReject);
+    m_alignAcceptReject->hide();
 
     QButtonGroup *selectGroup = new QButtonGroup;
-    selectGroup->setExclusive(false); // want to allow nothing to be checked
+    selectGroup->setExclusive(false);
     
     QLabel *selectFromLabel = new QLabel(tr("From:"));
     m_selectFrom = new QLabel(tr("Start"));
@@ -358,24 +364,48 @@ MainWindow::MainWindow(AudioMode audioMode, MIDIMode midiMode, bool withOSCSuppo
     connect(m_resetSelectionButton, SIGNAL(clicked()),
             m_scoreWidget, SLOT(clearSelection()));
     m_resetSelectionButton->setEnabled(false);
-    
-    selectionLayout->addWidget(new QLabel(" "), 0, 0);
-    selectionLayout->addWidget(selectFromLabel, 0, 1, Qt::AlignRight);
-    selectionLayout->addWidget(m_selectFromButton, 0, 2);
-    selectionLayout->addWidget(m_selectFrom, 0, 3);
-    selectionLayout->addWidget(selectToLabel, 1, 1, Qt::AlignRight);
-    selectionLayout->addWidget(m_selectToButton, 1, 2);
-    selectionLayout->addWidget(m_selectTo, 1, 3);
-    selectionLayout->addWidget(m_resetSelectionButton, 1, 4);
-    selectionLayout->setColumnStretch(3, 10);
 
-    selectionGroupBox->setLayout(selectionLayout);
+    scoreControlLayout->addWidget(selectFromLabel);
+    scoreControlLayout->addWidget(m_selectFromButton);
+    scoreControlLayout->addWidget(m_selectFrom);
+    scoreControlLayout->addSpacing(10);
+    scoreControlLayout->addWidget(selectToLabel);
+    scoreControlLayout->addWidget(m_selectToButton);
+    scoreControlLayout->addWidget(m_selectTo);
+    scoreControlLayout->addWidget(m_resetSelectionButton);
+    scoreControlLayout->addStretch(1);
+    scoreControlBar->setLayout(scoreControlLayout);
 
-    scoreWidgetLayout->addWidget(selectionGroupBox, 3, 0, 1, 3);
+    // Score scroll area for horizontal scrolling
+    m_scoreScroll = new QScrollArea;
+    m_scoreScroll->setWidget(m_scoreWidget);
+    m_scoreScroll->setWidgetResizable(true);
+    m_scoreScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_scoreScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_scoreScroll->setFrameShape(QFrame::NoFrame);
+
+    connect(m_scoreWidget, &ScoreWidget::scoreSizeChanged, [this]() {
+        m_scoreScroll->updateGeometry();
+    });
+
+    // Auto-scroll the score to keep highlighted event visible
+    connect(m_scoreWidget, &ScoreWidget::highlightPositionChanged,
+            [this](int xPos) {
+        m_scoreScroll->ensureVisible(xPos, m_scoreScroll->height() / 2,
+                                     m_scoreScroll->viewport()->width() / 3, 0);
+    });
+
+    // Bottom pane: score scroll + controls
+    QWidget *scorePane = new QWidget;
+    QVBoxLayout *scorePaneLayout = new QVBoxLayout;
+    scorePaneLayout->setContentsMargins(0, 0, 0, 0);
+    scorePaneLayout->setSpacing(0);
+    scorePaneLayout->addWidget(m_scoreScroll, 1);
+    scorePaneLayout->addWidget(scoreControlBar, 0);
+    scorePane->setLayout(scorePaneLayout);
 
     scoreWidgetContainer->setLayout(scoreWidgetLayout);
     scoreWidgetDock->setWidget(scoreWidgetContainer);
-    addDockWidget(Qt::LeftDockWidgetArea, scoreWidgetDock);
 
     m_mainScroll = new QScrollArea(frame);
     m_mainScroll->setWidgetResizable(true);
@@ -432,10 +462,27 @@ MainWindow::MainWindow(AudioMode audioMode, MIDIMode midiMode, bool withOSCSuppo
 
     layout->setSpacing(m_viewManager->scalePixelSize(4));
 
-    layout->addWidget(m_mainScroll, 0, 0, 1, 3);
-    layout->addWidget(m_overview, 1, 0);
-    layout->addWidget(m_playSpeed, 1, 1);
-    layout->addWidget(m_mainLevelPan, 1, 2);
+    // Top area: spectrogram + overview + controls
+    QWidget *topWidget = new QWidget;
+    QGridLayout *topLayout = new QGridLayout;
+    topLayout->setContentsMargins(0, 0, 0, 0);
+    topLayout->setSpacing(layout->spacing());
+    topLayout->addWidget(m_mainScroll, 0, 0, 1, 3);
+    topLayout->addWidget(m_overview, 1, 0);
+    topLayout->addWidget(m_playSpeed, 1, 1);
+    topLayout->addWidget(m_mainLevelPan, 1, 2);
+    topLayout->setColumnStretch(0, 10);
+    topWidget->setLayout(topLayout);
+
+    // Vertical splitter: spectrogram on top, score on bottom
+    QSplitter *splitter = new QSplitter(Qt::Vertical, frame);
+    splitter->addWidget(topWidget);
+    splitter->addWidget(scorePane);
+    splitter->setStretchFactor(0, 3); // spectrogram gets more space
+    splitter->setStretchFactor(1, 1); // score gets less space
+    splitter->setChildrenCollapsible(false);
+
+    layout->addWidget(splitter, 0, 0);
 
     m_playControlsWidth = 
         m_mainLevelPan->width() + m_playSpeed->width() + layout->spacing() * 2;

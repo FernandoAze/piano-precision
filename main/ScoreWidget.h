@@ -80,6 +80,18 @@ public:
      * Get the scale factor for score rendering.
      */
     int getScale() const;
+
+    /**
+     * Enable horizontal layout mode. In this mode the score is
+     * rendered as a single long horizontal line (one system) instead
+     * of being paginated. The widget's width will expand to fit the
+     * full score.
+     */
+    void setHorizontalLayout(bool horizontal);
+    bool isHorizontalLayout() const { return m_horizontalLayout; }
+
+    QSize sizeHint() const override;
+    QSize minimumSizeHint() const override;
     
     /**
      * Return the start and end locations and labels of the current
@@ -158,6 +170,8 @@ signals:
                           EventLabel endLabel);
     
     void pageChanged(int page);
+    void scoreSizeChanged();
+    void highlightPositionChanged(int xPosition);
 
 protected:
     void resizeEvent(QResizeEvent *) override;
@@ -182,6 +196,8 @@ private:
     std::vector<std::shared_ptr<QSvgRenderer>> m_svgPages;
     int m_page;
     int m_scale;
+    bool m_horizontalLayout;
+    QSize m_renderedSize;
 
     Score::MusicalEventList m_musicalEvents;
     
