@@ -143,6 +143,12 @@ public slots:
      */
     void clearSelection();
 
+    /**
+     * Shift the rendered score vertically within the widget.
+     * Positive values move the score down; negative move it up.
+     */
+    void setVerticalViewOffset(int offset);
+
     void zoomIn();
     void zoomReset();
     void zoomOut();
@@ -196,6 +202,7 @@ private:
     std::vector<std::shared_ptr<QSvgRenderer>> m_svgPages;
     int m_page;
     int m_scale;
+    int m_verticalViewOffset;
     bool m_horizontalLayout;
     QSize m_renderedSize;
 

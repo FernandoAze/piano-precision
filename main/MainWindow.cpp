@@ -142,6 +142,7 @@
 #include <QSplitter>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QScrollBar>
 #include <QToolButton>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
@@ -430,12 +431,29 @@ MainWindow::MainWindow(AudioMode audioMode, MIDIMode midiMode, bool withOSCSuppo
                                      m_scoreScroll->viewport()->width() / 3, 0);
     });
 
+        auto scoreVerticalScroll = new QScrollBar(Qt::Vertical);
+        scoreVerticalScroll->setRange(-200, 200);
+        scoreVerticalScroll->setValue(0);
+        scoreVerticalScroll->setSingleStep(5);
+        scoreVerticalScroll->setPageStep(20);
+        scoreVerticalScroll->setToolTip(tr("Adjust Vertical Score Position"));
+        connect(scoreVerticalScroll, &QScrollBar::valueChanged,
+            m_scoreWidget, &ScoreWidget::setVerticalViewOffset);
+
+        QWidget *scoreViewRow = new QWidget;
+        QHBoxLayout *scoreViewRowLayout = new QHBoxLayout;
+        scoreViewRowLayout->setContentsMargins(0, 0, 0, 0);
+        scoreViewRowLayout->setSpacing(4);
+        scoreViewRowLayout->addWidget(m_scoreScroll, 1);
+        scoreViewRowLayout->addWidget(scoreVerticalScroll, 0);
+        scoreViewRow->setLayout(scoreViewRowLayout);
+
     // Bottom pane: score scroll + controls
     QWidget *scorePane = new QWidget;
     QVBoxLayout *scorePaneLayout = new QVBoxLayout;
     scorePaneLayout->setContentsMargins(0, 0, 0, 0);
     scorePaneLayout->setSpacing(0);
-    scorePaneLayout->addWidget(m_scoreScroll, 1);
+        scorePaneLayout->addWidget(scoreViewRow, 1);
     scorePaneLayout->addWidget(scoreControlBar, 0);
     scorePane->setLayout(scorePaneLayout);
 

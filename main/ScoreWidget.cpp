@@ -50,6 +50,7 @@ ScoreWidget::ScoreWidget(bool withZoomControls, QWidget *parent) :
     QFrame(parent),
     m_page(-1),
     m_scale(100),
+    m_verticalViewOffset(0),
     m_horizontalLayout(false),
     m_mode(InteractionMode::None),
     m_mouseActive(false)
@@ -623,6 +624,16 @@ ScoreWidget::clearSelection()
 }
 
 void
+ScoreWidget::setVerticalViewOffset(int offset)
+{
+    if (m_verticalViewOffset == offset) {
+        return;
+    }
+    m_verticalViewOffset = offset;
+    update();
+}
+
+void
 ScoreWidget::zoomIn()
 {
     if (m_scale < 240) {
@@ -857,7 +868,7 @@ ScoreWidget::paintEvent(QPaintEvent *e)
         scale = std::min(ww / pw, wh / ph);
     }
     double xorigin = (ww - (pw * scale)) / 2.0;
-    double yorigin = (wh - (ph * scale)) / 2.0;
+    double yorigin = (wh - (ph * scale)) / 2.0 + m_verticalViewOffset;
 
     m_pageToWidget = QTransform();
     m_pageToWidget.translate(xorigin, yorigin);
@@ -1042,7 +1053,7 @@ ScoreWidget::paintEvent(QPaintEvent *e)
     paint.setPen(Qt::black);
     paint.setBrush(Qt::black);
 
-    renderer->render(&paint, QRectF(0, 0, ww, wh));
+    renderer->render(&paint, m_pageToWidget.mapRect(QRectF(0, 0, pw, ph)));
 }
 
 void
