@@ -142,6 +142,7 @@
 #include <QSplitter>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QToolButton>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QNetworkReply>
@@ -261,7 +262,7 @@ MainWindow::MainWindow(AudioMode audioMode, MIDIMode midiMode, bool withOSCSuppo
     
     QGridLayout *scoreWidgetLayout = new QGridLayout;
 
-    m_scoreWidget = new ScoreWidget(true, scoreWidgetContainer);
+    m_scoreWidget = new ScoreWidget(false, scoreWidgetContainer);
     m_scoreWidget->setHorizontalLayout(true);
     m_scoreWidget->setInteractionMode(ScoreWidget::InteractionMode::Navigate);
     connect(m_scoreWidget, &ScoreWidget::scoreLocationHighlighted,
@@ -336,6 +337,28 @@ MainWindow::MainWindow(AudioMode audioMode, MIDIMode midiMode, bool withOSCSuppo
     QHBoxLayout *scoreControlLayout = new QHBoxLayout;
     scoreControlLayout->setContentsMargins(2, 2, 2, 2);
     scoreControlLayout->setSpacing(6);
+
+        auto scoreZoomOut = new QToolButton;
+        scoreZoomOut->setText(QString(QChar(0x2212))); // mathematical minus
+        scoreZoomOut->setToolTip(tr("Decrease Staff Size"));
+        connect(scoreZoomOut, &QToolButton::clicked,
+            m_scoreWidget, &ScoreWidget::zoomOut);
+
+        auto scoreZoomReset = new QToolButton;
+        scoreZoomReset->setText(QString(QChar(0x2218))); // mathematical ring operator
+        scoreZoomReset->setToolTip(tr("Reset Staff Size to Default"));
+        connect(scoreZoomReset, &QToolButton::clicked,
+            m_scoreWidget, &ScoreWidget::zoomReset);
+
+        auto scoreZoomIn = new QToolButton;
+        scoreZoomIn->setText(QString(QChar(0x002b))); // mathematical plus
+        scoreZoomIn->setToolTip(tr("Increase Staff Size"));
+        connect(scoreZoomIn, &QToolButton::clicked,
+            m_scoreWidget, &ScoreWidget::zoomIn);
+
+        scoreControlLayout->addWidget(scoreZoomOut);
+        scoreControlLayout->addWidget(scoreZoomReset);
+        scoreControlLayout->addWidget(scoreZoomIn);
     scoreControlLayout->addWidget(m_alignCommands);
     scoreControlLayout->addWidget(m_alignAcceptReject);
     m_alignAcceptReject->hide();

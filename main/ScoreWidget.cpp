@@ -59,6 +59,11 @@ ScoreWidget::ScoreWidget(bool withZoomControls, QWidget *parent) :
     setMouseTracking(true);
     m_verovioResourcePath = ScoreParser::getResourcePath();
 
+    QSettings settings;
+    settings.beginGroup("ScoreWidget");
+    m_scale = settings.value("scale", m_scale).toInt();
+    settings.endGroup();
+
     if (withZoomControls) {
         sv::IconLoader il;
         auto zoomOut = new QToolButton;
@@ -80,11 +85,6 @@ ScoreWidget::ScoreWidget(bool withZoomControls, QWidget *parent) :
         layout->setRowStretch(0, 10);
         layout->setColumnStretch(3, 10);
         setLayout(layout);
-
-        QSettings settings;
-        settings.beginGroup("ScoreWidget");
-        m_scale = settings.value("scale", m_scale).toInt();
-        settings.endGroup();
     }
 }
 
