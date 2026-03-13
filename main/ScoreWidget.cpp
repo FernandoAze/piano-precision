@@ -26,6 +26,8 @@
 #include "base/Debug.h"
 #include "widgets/IconLoader.h"
 
+#include <algorithm>
+#include <limits>
 #include <vector>
 
 #include "verovio/include/vrv/toolkit.h"
@@ -52,6 +54,9 @@ ScoreWidget::ScoreWidget(bool withZoomControls, QWidget *parent) :
     m_scale(100),
     m_verticalViewOffset(0),
     m_horizontalLayout(false),
+    m_visibleMeasureCount(0),
+    m_measureWindowStart(0),
+    m_measureWindowEnd(0),
     m_mode(InteractionMode::None),
     m_mouseActive(false)
 {
@@ -69,15 +74,15 @@ ScoreWidget::ScoreWidget(bool withZoomControls, QWidget *parent) :
         sv::IconLoader il;
         auto zoomOut = new QToolButton;
         zoomOut->setText(QString(QChar(0x2212))); // mathematical minus
-        zoomOut->setToolTip(tr("Decrease Staff Size"));
+        zoomOut->setToolTip(tr("Show one fewer measure (minimum 1)"));
         connect(zoomOut, &QToolButton::clicked, this, &ScoreWidget::zoomOut);
         auto zoomReset = new QToolButton;
         zoomReset->setText(QString(QChar(0x2218))); // mathematical ring operator, I just quite liked it!
-        zoomReset->setToolTip(tr("Reset Staff Size to Default"));
+        zoomReset->setToolTip(tr("Reset to default full-score view"));
         connect(zoomReset, &QToolButton::clicked, this, &ScoreWidget::zoomReset);
         auto zoomIn = new QToolButton;
         zoomIn->setText(QString(QChar(0x002b))); // mathematical plus
-        zoomIn->setToolTip(tr("Increase Staff Size"));
+        zoomIn->setToolTip(tr("Show one more measure (maximum 5)"));
         connect(zoomIn, &QToolButton::clicked, this, &ScoreWidget::zoomIn);
         auto layout = new QGridLayout;
         layout->addWidget(zoomOut, 1, 0);
@@ -197,8 +202,15 @@ ScoreWidget::loadScoreFile(QString scoreName, QString scoreFile, QString &errorS
     
     clearSelection();
 
+    bool scoreChanged = (scoreFile != m_scoreFilename);
+
     m_svgPages.clear();
     m_noteSystemExtentMap.clear();
+    m_noteMeasureIdMap.clear();
+
+    if (scoreChanged) {
+        m_measureIdForNumber.clear();
+    }
 
     m_highlightEventLabel = {};
     m_eventToHighlight = {};
@@ -210,71 +222,132 @@ ScoreWidget::loadScoreFile(QString scoreName, QString scoreFile, QString &errorS
     SVDEBUG << "ScoreWidget::loadScoreFile: Asked to load MEI file \""
             << scoreFile << "\" for score \"" << scoreName << "\"" << endl;
 
+    auto configureToolkit =
+        [this](vrv::Toolkit &toolkit, bool windowMode) {
+
+        string defaultOptions = "\"footer\": \"none\"";
+
+        if (windowMode) {
+            string pageOptions =
+                "\"breaks\": \"none\", "
+                "\"adjustPageHeight\": true, "
+                "\"adjustPageWidth\": false, "
+                + defaultOptions;
+
+            if (m_scale != 100) {
+                toolkit.SetOptions("{\"scaleToPageSize\": true, " +
+                                   pageOptions + "}");
+                toolkit.SetScale(m_scale);
+            } else {
+                toolkit.SetOptions("{" + pageOptions + "}");
+            }
+
+            return;
+        }
+
+        if (m_horizontalLayout) {
+            string horizOptions = "\"breaks\": \"none\", "
+                "\"adjustPageHeight\": true, "
+                "\"adjustPageWidth\": true, "
+                "\"pageWidth\": 60000, "
+                + defaultOptions;
+            if (m_scale != 100) {
+                toolkit.SetOptions("{\"scaleToPageSize\": true, " +
+                                   horizOptions + "}");
+                toolkit.SetScale(m_scale);
+            } else {
+                toolkit.SetOptions("{" + horizOptions + "}");
+            }
+        } else if (m_scale != 100) {
+            toolkit.SetOptions("{\"scaleToPageSize\": true, " +
+                               defaultOptions + "}");
+            toolkit.SetScale(m_scale);
+        } else {
+            toolkit.SetOptions("{" + defaultOptions + "}");
+        }
+    };
+
+    auto renderToolkit =
+        [this](vrv::Toolkit &toolkit) {
+
+        int pp = toolkit.GetPageCount();
+
+        SVDEBUG << "ScoreWidget::loadScoreFile: Have " << pp << " pages" << endl;
+
+        for (int p = 0; p < pp; ++p) {
+
+            std::string svgText = toolkit.RenderToSVG(p + 1); // (verovio is 1-based)
+
+            // Verovio generates SVG 1.1, this transforms its output to
+            // SVG 1.2 Tiny required by Qt
+            svgText = VrvTrim::transformSvgToTiny(svgText);
+
+            QByteArray svgData = QByteArray::fromStdString(svgText);
+
+            shared_ptr<QSvgRenderer> renderer = make_shared<QSvgRenderer>(svgData);
+            renderer->setAspectRatioMode(Qt::KeepAspectRatio);
+
+            SVDEBUG << "ScoreWidget::showPage: created renderer from "
+                    << svgData.size() << "-byte SVG data" << endl;
+
+            m_svgPages.push_back(renderer);
+
+            findSystemExtents(svgData, renderer);
+        }
+    };
+
     vrv::Toolkit toolkit(false);
     if (!toolkit.SetResourcePath(m_verovioResourcePath)) {
         SVDEBUG << "ScoreWidget::loadScoreFile: Failed to set Verovio resource path" << endl;
         return false;
     }
 
-    string defaultOptions = "\"footer\": \"none\"";
+    bool windowMode = false;
+    if (m_horizontalLayout && m_visibleMeasureCount > 0 &&
+        m_measureWindowStart > 0 && m_measureWindowEnd >= m_measureWindowStart) {
 
-    if (m_horizontalLayout) {
-        // Render as a single horizontal system: no line breaks,
-        // very wide page, height adjusted to content
-        string horizOptions = "\"breaks\": \"none\", "
-            "\"adjustPageHeight\": true, "
-            "\"adjustPageWidth\": true, "
-            "\"pageWidth\": 60000, "
-            + defaultOptions;
-        if (m_scale != 100) {
-            toolkit.SetOptions("{\"scaleToPageSize\": true, " + horizOptions + "}");
-            if (!toolkit.SetScale(m_scale)) {
-                SVDEBUG << "ScoreWidget::loadScoreFile: Failed to set rendering scale" << endl;
+        auto i0 = m_measureIdForNumber.find(m_measureWindowStart);
+        auto i1 = m_measureIdForNumber.find(m_measureWindowEnd);
+
+        if (i0 != m_measureIdForNumber.end() && i1 != m_measureIdForNumber.end()) {
+
+            vrv::Toolkit sourceToolkit(false);
+            if (!sourceToolkit.SetResourcePath(m_verovioResourcePath)) {
+                SVDEBUG << "ScoreWidget::loadScoreFile: Failed to set source Verovio resource path" << endl;
+                return false;
             }
-        } else {
-            toolkit.SetOptions("{" + horizOptions + "}");
+
+            configureToolkit(sourceToolkit, false);
+            if (!sourceToolkit.LoadFile(scoreFile.toStdString())) {
+                SVDEBUG << "ScoreWidget::loadScoreFile: Failed to load source MEI for window rendering" << endl;
+                return false;
+            }
+
+            std::string json =
+                "{\"scoreBased\": true, \"firstMeasure\": \"" + i0->second +
+                "\", \"lastMeasure\": \"" + i1->second + "\"}";
+
+            std::string meiWindow = sourceToolkit.GetMEI(json);
+            if (!meiWindow.empty()) {
+                configureToolkit(toolkit, true);
+                if (!toolkit.LoadData(meiWindow)) {
+                    SVDEBUG << "ScoreWidget::loadScoreFile: Failed to load extracted MEI window" << endl;
+                    return false;
+                }
+                windowMode = true;
+            }
         }
-    } else if (m_scale != 100) {
-        toolkit.SetOptions("{\"scaleToPageSize\": true, " + defaultOptions + "}");
-        if (!toolkit.SetScale(m_scale)) {
-            SVDEBUG << "ScoreWidget::loadScoreFile: Failed to set rendering scale" << endl;
-        } else {
-            SVDEBUG << "ScoreWidget::loadScoreFile: Set scale to " << m_scale << endl;
+    }
+
+    if (!windowMode) {
+        configureToolkit(toolkit, false);
+        if (!toolkit.LoadFile(scoreFile.toStdString())) {
+            SVDEBUG << "ScoreWidget::loadScoreFile: Load failed in Verovio toolkit" << endl;
+            return false;
         }
-        SVDEBUG << "options: " << toolkit.GetOptions() << endl;
-    } else {
-        toolkit.SetOptions("{" + defaultOptions + "}");
-    }
-    
-    if (!toolkit.LoadFile(scoreFile.toStdString())) {
-        SVDEBUG << "ScoreWidget::loadScoreFile: Load failed in Verovio toolkit" << endl;
-        return false;
     }
 
-    int pp = toolkit.GetPageCount();
-
-    SVDEBUG << "ScoreWidget::loadScoreFile: Have " << pp << " pages" << endl;
-    
-    for (int p = 0; p < pp; ++p) {
-
-        std::string svgText = toolkit.RenderToSVG(p + 1); // (verovio is 1-based)
-
-        // Verovio generates SVG 1.1, this transforms its output to
-        // SVG 1.2 Tiny required by Qt
-        svgText = VrvTrim::transformSvgToTiny(svgText);
-
-        QByteArray svgData = QByteArray::fromStdString(svgText);
-        
-        shared_ptr<QSvgRenderer> renderer = make_shared<QSvgRenderer>(svgData);
-        renderer->setAspectRatioMode(Qt::KeepAspectRatio);
-
-        SVDEBUG << "ScoreWidget::showPage: created renderer from "
-                << svgData.size() << "-byte SVG data" << endl;
-
-        m_svgPages.push_back(renderer);
-
-        findSystemExtents(svgData, renderer);
-    }
+    renderToolkit(toolkit);
     
     m_scoreName = scoreName;
     m_scoreFilename = scoreFile;
@@ -359,8 +432,8 @@ ScoreWidget::findSystemExtents(QByteArray svgData, shared_ptr<QSvgRenderer> rend
         return {};
     };
     
-    std::function<void(QDomNode, QString, QString)> descend =
-        [&](QDomNode node, QString systemId, QString staffId) {
+    std::function<void(QDomNode, QString, QString, QString)> descend =
+        [&](QDomNode node, QString systemId, QString staffId, QString measureId) {
 
         if (!node.isElement()) {
             return;
@@ -399,6 +472,10 @@ ScoreWidget::findSystemExtents(QByteArray svgData, shared_ptr<QSvgRenderer> rend
                     currentExtent = {};
                 }
             }
+
+            if (measureId == "" && classes.contains("measure")) {
+                measureId = elt.attribute("id");
+            }
             
             if (!currentExtent.isNull() && classes.contains("note")) {
                 QString noteId = elt.attribute("id");
@@ -410,17 +487,20 @@ ScoreWidget::findSystemExtents(QByteArray svgData, shared_ptr<QSvgRenderer> rend
                             << ") to note with id \"" << noteId << "\"" << endl;
 #endif
                     m_noteSystemExtentMap[noteId] = currentExtent;
+                    if (measureId != "") {
+                        m_noteMeasureIdMap[noteId] = measureId.toStdString();
+                    }
                 }
             }
         }
             
         auto children = node.childNodes();
         for (int i = 0; i < children.size(); ++i) {
-            descend(children.at(i), systemId, staffId);
+            descend(children.at(i), systemId, staffId, measureId);
         }
     };
 
-    descend(doc.documentElement(), "", "");
+    descend(doc.documentElement(), "", "", "");
 }                       
 
 void
@@ -485,6 +565,11 @@ ScoreWidget::setMusicalEvents(const Score::MusicalEventList &events)
                 m_idDataMap[id] = data;
                 m_pageEventsMap[p].push_back(id);
                 m_labelIdMap[data.label] = id;
+
+                auto mItr = m_noteMeasureIdMap.find(id);
+                if (mItr != m_noteMeasureIdMap.end()) {
+                    m_measureIdForNumber[ev.measureInfo.measureNumber] = mItr->second;
+                }
             }
         }
         ++ix;
@@ -493,6 +578,8 @@ ScoreWidget::setMusicalEvents(const Score::MusicalEventList &events)
 #ifdef DEBUG_SCORE_WIDGET
     SVDEBUG << "ScoreWidget::setMusicalEvents: Done" << endl;
 #endif
+
+    updateMeasureWindowFromPlayback();
 }
 
 void
@@ -633,26 +720,174 @@ ScoreWidget::setVerticalViewOffset(int offset)
     update();
 }
 
+int
+ScoreWidget::playbackMeasureNumber() const
+{
+    if (m_highlightEventLabel != "") {
+        int ix = findEventIndexByLabel(m_highlightEventLabel);
+        if (ix >= 0 && ix < int(m_musicalEvents.size())) {
+            return m_musicalEvents[ix].measureInfo.measureNumber;
+        }
+    }
+
+    if (m_eventToHighlight.isNull()) {
+        return -1;
+    }
+    int index = m_eventToHighlight.indexInEvents;
+    if (index < 0 || index >= int(m_musicalEvents.size())) {
+        return -1;
+    }
+    return m_musicalEvents[index].measureInfo.measureNumber;
+}
+
+std::pair<int, int>
+ScoreWidget::scoreMeasureRange() const
+{
+    if (m_musicalEvents.empty()) {
+        return std::make_pair(0, 0);
+    }
+    int minMeasure = std::numeric_limits<int>::max();
+    int maxMeasure = std::numeric_limits<int>::min();
+    for (const auto &event : m_musicalEvents) {
+        minMeasure = std::min(minMeasure, event.measureInfo.measureNumber);
+        maxMeasure = std::max(maxMeasure, event.measureInfo.measureNumber);
+    }
+    return std::make_pair(minMeasure, maxMeasure);
+}
+
+bool
+ScoreWidget::updateMeasureWindowFromPlayback()
+{
+    if (m_visibleMeasureCount <= 0 || !m_horizontalLayout) {
+        bool changed = (m_measureWindowStart != 0 || m_measureWindowEnd != 0);
+        m_measureWindowStart = 0;
+        m_measureWindowEnd = 0;
+        return changed;
+    }
+
+    const int playbackMeasure = playbackMeasureNumber();
+    if (playbackMeasure < 0) {
+        return false;
+    }
+
+    const auto scoreRange = scoreMeasureRange();
+    const int minMeasure = scoreRange.first;
+    const int maxMeasure = scoreRange.second;
+    if (minMeasure > maxMeasure) {
+        return false;
+    }
+
+    int before = 0;
+    int after = 0;
+    if ((m_visibleMeasureCount % 2) == 1) {
+        before = m_visibleMeasureCount / 2;
+        after = m_visibleMeasureCount / 2;
+    } else {
+        before = (m_visibleMeasureCount / 2) - 1;
+        after = m_visibleMeasureCount / 2;
+    }
+
+    int start = playbackMeasure - before;
+    int end = playbackMeasure + after;
+
+    if (start < minMeasure) {
+        end += (minMeasure - start);
+        start = minMeasure;
+    }
+    if (end > maxMeasure) {
+        start -= (end - maxMeasure);
+        end = maxMeasure;
+    }
+
+    start = std::max(start, minMeasure);
+    end = std::min(end, maxMeasure);
+
+    if (!(start <= playbackMeasure && playbackMeasure <= end)) {
+        return false;
+    }
+
+    bool changed = (start != m_measureWindowStart || end != m_measureWindowEnd);
+    m_measureWindowStart = start;
+    m_measureWindowEnd = end;
+    return changed;
+}
+
+int
+ScoreWidget::findEventIndexByLabel(EventLabel label) const
+{
+    for (int i = 0; i < int(m_musicalEvents.size()); ++i) {
+        if (m_musicalEvents[i].measureInfo.toLabel() == label) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool
+ScoreWidget::reloadScoreForCurrentView()
+{
+    if (m_scoreFilename.isEmpty()) {
+        return false;
+    }
+
+    QString errorString;
+    auto scoreName = m_scoreName;
+    auto scoreFilename = m_scoreFilename;
+    auto events = m_musicalEvents;
+
+    if (!loadScoreFile(scoreName, scoreFilename, errorString)) {
+        SVDEBUG << "ScoreWidget::reloadScoreForCurrentView: Failed to reload score "
+                << scoreName << ": " << errorString << endl;
+        return false;
+    }
+
+    setMusicalEvents(events);
+    return true;
+}
+
 void
 ScoreWidget::zoomIn()
 {
-    if (m_scale < 240) {
-        setScale(m_scale + 20);
+    if (m_visibleMeasureCount <= 0) {
+        m_visibleMeasureCount = 1;
+    } else if (m_visibleMeasureCount < 5) {
+        ++m_visibleMeasureCount;
     }
+
+    updateMeasureWindowFromPlayback();
+    if (reloadScoreForCurrentView() && m_highlightEventLabel != "") {
+        setHighlightEventByLabel(m_highlightEventLabel);
+    }
+    update();
 }
 
 void
 ScoreWidget::zoomOut()
 {
-    if (m_scale > 20) {
-        setScale(m_scale - 20);
+    if (m_visibleMeasureCount <= 0) {
+        m_visibleMeasureCount = 1;
+    } else if (m_visibleMeasureCount > 1) {
+        --m_visibleMeasureCount;
     }
+
+    updateMeasureWindowFromPlayback();
+    if (reloadScoreForCurrentView() && m_highlightEventLabel != "") {
+        setHighlightEventByLabel(m_highlightEventLabel);
+    }
+    update();
 }
 
 void
 ScoreWidget::zoomReset()
 {
-    setScale(100);
+    m_visibleMeasureCount = 0;
+
+    reloadScoreForCurrentView();
+    if (m_highlightEventLabel != "") {
+        setHighlightEventByLabel(m_highlightEventLabel);
+    }
+
+    update();
 }
 
 ScoreWidget::EventData
@@ -796,7 +1031,7 @@ ScoreWidget::getEventAtPoint(QPoint point)
             << "," << point.y() << " -> element id " << found.id
             << " with x = " << foundX << endl;
 #endif
-    
+
     return found;
 }
 
@@ -809,7 +1044,7 @@ ScoreWidget::getHighlightRectFor(const EventData &event)
         Extent extent = m_noteSystemExtentMap.at(event.id);
         rect = QRectF(rect.x(), extent.y, rect.width(), extent.height);
     }
-                      
+
     return m_pageToWidget.mapRect(rect);
 }
 
@@ -831,7 +1066,7 @@ ScoreWidget::paintEvent(QPaintEvent *e)
     // the paint device scaled while preserving aspect. But we still
     // need to do the same calculations ourselves to construct the
     // transforms needed for mapping to e.g. mouse interaction space
-    
+
     QSizeF widgetSize = size();
     QSizeF pageSize = renderer->viewBoxF().size();
 
@@ -842,41 +1077,56 @@ ScoreWidget::paintEvent(QPaintEvent *e)
     SVDEBUG << "ScoreWidget::paint: widget size " << ww << "x" << wh
             << ", page size " << pw << "x" << ph << endl;
 #endif
-    
+
     if (!ww || !wh || !pw || !ph) {
         SVDEBUG << "ScoreWidgetPDF::paint: one of our dimensions is zero, can't proceed" << endl;
         return;
     }
 
-    double scale;
     if (m_horizontalLayout) {
-        // Scale to fit height; width will extend as needed
-        scale = wh / ph;
-        int requiredWidth = int(pw * scale + 0.5);
+        bool pageWindowMode = (m_visibleMeasureCount > 0);
+
+        double scale = 1.0;
+        int requiredWidth = int(ww + 0.5);
+        if (pageWindowMode) {
+            scale = std::min(ww / pw, wh / ph);
+            requiredWidth = int(ww + 0.5);
+        } else {
+            scale = wh / ph;
+            requiredWidth = int(pw * scale + 0.5);
+        }
+
         QSize newSize(requiredWidth, int(wh));
         if (newSize != m_renderedSize) {
             m_renderedSize = newSize;
-            // Resize widget to match the full rendered width so
-            // the parent scroll area can scroll horizontally
-            if (requiredWidth > int(ww)) {
-                setMinimumWidth(requiredWidth);
-                updateGeometry();
-                emit scoreSizeChanged();
-            }
+            setMinimumWidth(requiredWidth);
+            updateGeometry();
+            emit scoreSizeChanged();
         }
+
+        double xorigin = (ww - (pw * scale)) / 2.0;
+        double yorigin = (wh - (ph * scale)) / 2.0 + m_verticalViewOffset;
+
+        m_pageToWidget = QTransform();
+        m_pageToWidget.translate(xorigin, yorigin);
+        m_pageToWidget.scale(scale, scale);
+
+        m_widgetToPage = QTransform();
+        m_widgetToPage.scale(1.0 / scale, 1.0 / scale);
+        m_widgetToPage.translate(-xorigin, -yorigin);
     } else {
-        scale = std::min(ww / pw, wh / ph);
+        double scale = std::min(ww / pw, wh / ph);
+        double xorigin = (ww - (pw * scale)) / 2.0;
+        double yorigin = (wh - (ph * scale)) / 2.0 + m_verticalViewOffset;
+
+        m_pageToWidget = QTransform();
+        m_pageToWidget.translate(xorigin, yorigin);
+        m_pageToWidget.scale(scale, scale);
+
+        m_widgetToPage = QTransform();
+        m_widgetToPage.scale(1.0 / scale, 1.0 / scale);
+        m_widgetToPage.translate(-xorigin, -yorigin);
     }
-    double xorigin = (ww - (pw * scale)) / 2.0;
-    double yorigin = (wh - (ph * scale)) / 2.0 + m_verticalViewOffset;
-
-    m_pageToWidget = QTransform();
-    m_pageToWidget.translate(xorigin, yorigin);
-    m_pageToWidget.scale(scale, scale);
-
-    m_widgetToPage = QTransform();
-    m_widgetToPage.scale(1.0 / scale, 1.0 / scale);
-    m_widgetToPage.translate(-xorigin, -yorigin);
     
     // Show a highlight bar if the interaction mode is anything other
     // than None - the colour and location depend on the mode
@@ -1050,10 +1300,10 @@ ScoreWidget::paintEvent(QPaintEvent *e)
         }
     }
 
-    paint.setPen(Qt::black);
-    paint.setBrush(Qt::black);
-
-    renderer->render(&paint, m_pageToWidget.mapRect(QRectF(0, 0, pw, ph)));
+    paint.save();
+    paint.setWorldTransform(m_pageToWidget, false);
+    renderer->render(&paint, QRectF(0, 0, pw, ph));
+    paint.restore();
 }
 
 void
@@ -1073,15 +1323,20 @@ ScoreWidget::showPage(int page)
 void
 ScoreWidget::setHighlightEventByLabel(EventLabel label)
 {
+    m_highlightEventLabel = label;
+
+    if (m_visibleMeasureCount > 0 && m_horizontalLayout) {
+        if (updateMeasureWindowFromPlayback()) {
+            reloadScoreForCurrentView();
+        }
+    }
+
     m_eventToHighlight = getEventWithLabel(label);
     if (m_eventToHighlight.isNull()) {
         SVDEBUG << "ScoreWidget::setHighlightEventByLabel: Label \"" << label
                 << "\" not found" << endl;
-        m_highlightEventLabel = "";
         return;
     }
-
-    m_highlightEventLabel = label;
     
 #ifdef DEBUG_SCORE_WIDGET
     SVDEBUG << "ScoreWidget::setHighlightEventByLabel: Event with label \""

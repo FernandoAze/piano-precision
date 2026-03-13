@@ -341,19 +341,19 @@ MainWindow::MainWindow(AudioMode audioMode, MIDIMode midiMode, bool withOSCSuppo
 
         auto scoreZoomOut = new QToolButton;
         scoreZoomOut->setText(QString(QChar(0x2212))); // mathematical minus
-        scoreZoomOut->setToolTip(tr("Decrease Staff Size"));
+        scoreZoomOut->setToolTip(tr("Show one fewer measure (minimum 1)"));
         connect(scoreZoomOut, &QToolButton::clicked,
             m_scoreWidget, &ScoreWidget::zoomOut);
 
         auto scoreZoomReset = new QToolButton;
         scoreZoomReset->setText(QString(QChar(0x2218))); // mathematical ring operator
-        scoreZoomReset->setToolTip(tr("Reset Staff Size to Default"));
+        scoreZoomReset->setToolTip(tr("Reset to default full-score view"));
         connect(scoreZoomReset, &QToolButton::clicked,
             m_scoreWidget, &ScoreWidget::zoomReset);
 
         auto scoreZoomIn = new QToolButton;
         scoreZoomIn->setText(QString(QChar(0x002b))); // mathematical plus
-        scoreZoomIn->setToolTip(tr("Increase Staff Size"));
+        scoreZoomIn->setToolTip(tr("Show one more measure (maximum 5)"));
         connect(scoreZoomIn, &QToolButton::clicked,
             m_scoreWidget, &ScoreWidget::zoomIn);
 

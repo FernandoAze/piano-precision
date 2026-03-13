@@ -17,6 +17,8 @@
 #include <QFrame>
 
 #include <map>
+#include <string>
+#include <utility>
 
 #include "piano-precision-aligner/Score.h"
 
@@ -206,6 +208,14 @@ private:
     bool m_horizontalLayout;
     QSize m_renderedSize;
 
+    // 0 means default full-score mode; 1..5 means fixed measure-window mode
+    int m_visibleMeasureCount;
+    int m_measureWindowStart;
+    int m_measureWindowEnd;
+
+    std::map<EventId, std::string> m_noteMeasureIdMap;
+    std::map<int, std::string> m_measureIdForNumber;
+
     Score::MusicalEventList m_musicalEvents;
     
     struct EventData {
@@ -263,6 +273,12 @@ private:
     QRectF getHighlightRectFor(const EventData &);
     
     void findSystemExtents(QByteArray, std::shared_ptr<QSvgRenderer>);
+
+    int playbackMeasureNumber() const;
+    std::pair<int, int> scoreMeasureRange() const;
+    bool updateMeasureWindowFromPlayback();
+    bool reloadScoreForCurrentView();
+    int findEventIndexByLabel(EventLabel label) const;
     
     QTransform m_widgetToPage;
     QTransform m_pageToWidget;
