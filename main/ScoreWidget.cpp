@@ -856,13 +856,10 @@ ScoreWidget::paintEvent(QPaintEvent *e)
         QSize newSize(requiredWidth, int(wh));
         if (newSize != m_renderedSize) {
             m_renderedSize = newSize;
-            // Resize widget to match the full rendered width so
-            // the parent scroll area can scroll horizontally
-            if (requiredWidth > int(ww)) {
-                setMinimumWidth(requiredWidth);
-                updateGeometry();
-                emit scoreSizeChanged();
-            }
+            // Always update minimum width in horizontal layout to allow proper resizing
+            setMinimumWidth(requiredWidth);
+            updateGeometry();
+            emit scoreSizeChanged();
         }
     } else {
         scale = std::min(ww / pw, wh / ph);
